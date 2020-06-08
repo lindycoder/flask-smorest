@@ -66,7 +66,6 @@ class ResponseMixin:
             resp_doc['examples'] = examples
         if headers is not None:
             resp_doc['headers'] = headers
-        doc = {'responses': {code: resp_doc}}
 
         def decorator(func):
 
@@ -102,13 +101,15 @@ class ResponseMixin:
 
                 return resp
 
-            # Document default error response
-            doc['responses']['default'] = 'DEFAULT_ERROR'
-
             # Store doc in wrapper function
             # The deepcopy avoids modifying the wrapped function doc
             wrapper._apidoc = deepcopy(getattr(wrapper, '_apidoc', {}))
-            wrapper._apidoc['response'] = doc
+            # Document default error response
+            wrapper._apidoc.setdefault(
+                'response', {}
+            ).setdefault('responses', {})[code] = resp_doc
+            wrapper._apidoc[
+                'response']['responses']['default'] = 'DEFAULT_ERROR'
             # Indicate which code is the success status code
             # Helps other decorators documenting success response
             wrapper._apidoc['success_status_code'] = code
@@ -117,9 +118,66 @@ class ResponseMixin:
 
         return decorator
 
+    def alt_response(
+            self, code, schema_or_ref, *, description=None,
+            example=None, examples=None, headers=None
+    ):
+        """Decorator documenting an alternative response
+
+        :param int|str|HTTPStatus code: HTTP status code.
+        :param schema_or_ref: Either a :class:`Schema <marshmallow.Schema>`
+            class or instance or a string error reference.
+            When passing a reference, arguments below are ignored.
+        :param str description: Description of the response (default: None).
+        :param dict example: Example of response message.
+        :param list examples: Examples of response message.
+        :param dict headers: Headers returned by the response.
+        """
+        # If a ref is passed
+        if isinstance(schema_or_ref, str):
+            resp_doc = schema_or_ref
+        # If a schema is passed
+        else:
+            schema = schema_or_ref
+            if isinstance(schema, type):
+                schema = schema()
+
+            # Document response (schema, description,...) in the API doc
+            resp_doc = {}
+            doc_schema = self._make_doc_alternate_response_schema(schema)
+            if doc_schema is not None:
+                resp_doc['schema'] = doc_schema
+            if description is not None:
+                resp_doc['description'] = description
+            else:
+                resp_doc['description'] = http.HTTPStatus(int(code)).phrase
+            if example is not None:
+                resp_doc['example'] = example
+            if examples is not None:
+                resp_doc['examples'] = examples
+            if headers is not None:
+                resp_doc['headers'] = headers
+
+        def decorator(func):
+
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            # Store doc in wrapper function
+            # The deepcopy avoids modifying the wrapped function doc
+            wrapper._apidoc = deepcopy(getattr(wrapper, '_apidoc', {}))
+            wrapper._apidoc.setdefault(
+                'response', {}
+            ).setdefault('responses', {})[code] = resp_doc
+
+            return wrapper
+
+        return decorator
+
     @staticmethod
     def _make_doc_response_schema(schema):
-        """Override this to modify schema in docs
+        """Override this to modify response schema in docs
 
         This can be used to document a wrapping structure.
 
@@ -135,6 +193,11 @@ class ResponseMixin:
                         )
                     return None
         """
+        return schema
+
+    @staticmethod
+    def _make_doc_alternate_response_schema(schema):
+        """Override this to modify alternate response schema in docs"""
         return schema
 
     @staticmethod
